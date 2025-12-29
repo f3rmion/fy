@@ -8,7 +8,7 @@ Top-level packages are entry points to public APIs that become importable.
 
 ```bash
 fy/
-├── group/        # Interface definition (Curve, Point, Scalar interfaces)
+├── group/        # Interface definition (Group, Point, Scalar interfaces)
 ├── bjj/          # BabyJubJub implementation of group.Group interface
 ├── frost/        # FROST protocol (depends on group.Group)
 ├── internal/     # Private helpers
