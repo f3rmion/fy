@@ -2,6 +2,7 @@ package frost
 
 import (
 	"crypto/rand"
+	"fmt"
 	"testing"
 
 	"github.com/f3rmion/fy/bjj"
@@ -111,6 +112,330 @@ func TestDKGAndSign(t *testing.T) {
 				t.Error("signature should not verify with wrong message")
 			}
 		})
+	})
+}
+
+func TestSigningWithDifferentSignerSubsets(t *testing.T) {
+	g := &bjj.BJJ{}
+	threshold := 2
+	total := 4
+
+	f, err := New(g, threshold, total)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run DKG
+	participants := make([]*Participant, total)
+	for i := 0; i < total; i++ {
+		p, err := f.NewParticipant(rand.Reader, i+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		participants[i] = p
+	}
+
+	broadcasts := make([]*Round1Data, total)
+	for i, p := range participants {
+		broadcasts[i] = p.Round1Broadcast()
+	}
+
+	for i, sender := range participants {
+		for j := 0; j < total; j++ {
+			if i == j {
+				continue
+			}
+			privateData := f.Round1PrivateSend(sender, j+1)
+			if err := f.Round2ReceiveShare(participants[j], privateData, broadcasts[i].Commitments); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	keyShares := make([]*KeyShare, total)
+	for i, p := range participants {
+		ks, err := f.Finalize(p, broadcasts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyShares[i] = ks
+	}
+
+	message := []byte("test message")
+
+	// Test different signer subsets
+	subsets := [][]int{
+		{0, 1},       // participants 1 and 2
+		{0, 2},       // participants 1 and 3
+		{0, 3},       // participants 1 and 4
+		{1, 2},       // participants 2 and 3
+		{1, 3},       // participants 2 and 4
+		{2, 3},       // participants 3 and 4
+		{0, 1, 2},    // participants 1, 2, and 3
+		{0, 1, 2, 3}, // all participants
+	}
+
+	for _, subset := range subsets {
+		t.Run(subsetName(subset), func(t *testing.T) {
+			signers := make([]*KeyShare, len(subset))
+			for i, idx := range subset {
+				signers[i] = keyShares[idx]
+			}
+
+			// Round 1
+			nonces := make([]*SigningNonce, len(signers))
+			commitments := make([]*SigningCommitment, len(signers))
+			for i, ks := range signers {
+				n, c, err := f.SignRound1(rand.Reader, ks)
+				if err != nil {
+					t.Fatal(err)
+				}
+				nonces[i] = n
+				commitments[i] = c
+			}
+
+			// Round 2
+			sigShares := make([]*SignatureShare, len(signers))
+			for i, ks := range signers {
+				ss, err := f.SignRound2(ks, nonces[i], message, commitments)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sigShares[i] = ss
+			}
+
+			// Aggregate
+			sig, err := f.Aggregate(message, commitments, sigShares)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Verify
+			if !f.Verify(message, sig, keyShares[0].GroupKey) {
+				t.Error("signature verification failed")
+			}
+		})
+	}
+}
+
+func subsetName(subset []int) string {
+	name := "signers"
+	for _, idx := range subset {
+		name += fmt.Sprintf("_%d", idx+1)
+	}
+	return name
+}
+
+func TestSigningWithDifferentThresholds(t *testing.T) {
+	g := &bjj.BJJ{}
+
+	configs := []struct {
+		threshold int
+		total     int
+	}{
+		{2, 3},
+		{2, 5},
+		{3, 5},
+		{3, 7},
+	}
+
+	for _, cfg := range configs {
+		name := fmt.Sprintf("%d_of_%d", cfg.threshold, cfg.total)
+		t.Run(name, func(t *testing.T) {
+			f, err := New(g, cfg.threshold, cfg.total)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Run DKG
+			participants := make([]*Participant, cfg.total)
+			for i := 0; i < cfg.total; i++ {
+				p, err := f.NewParticipant(rand.Reader, i+1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				participants[i] = p
+			}
+
+			broadcasts := make([]*Round1Data, cfg.total)
+			for i, p := range participants {
+				broadcasts[i] = p.Round1Broadcast()
+			}
+
+			for i, sender := range participants {
+				for j := 0; j < cfg.total; j++ {
+					if i == j {
+						continue
+					}
+					privateData := f.Round1PrivateSend(sender, j+1)
+					if err := f.Round2ReceiveShare(participants[j], privateData, broadcasts[i].Commitments); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
+			keyShares := make([]*KeyShare, cfg.total)
+			for i, p := range participants {
+				ks, err := f.Finalize(p, broadcasts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				keyShares[i] = ks
+			}
+
+			// Sign with exactly threshold signers
+			message := []byte("threshold signing test")
+			signers := keyShares[:cfg.threshold]
+
+			nonces := make([]*SigningNonce, cfg.threshold)
+			commitments := make([]*SigningCommitment, cfg.threshold)
+			for i, ks := range signers {
+				n, c, err := f.SignRound1(rand.Reader, ks)
+				if err != nil {
+					t.Fatal(err)
+				}
+				nonces[i] = n
+				commitments[i] = c
+			}
+
+			sigShares := make([]*SignatureShare, cfg.threshold)
+			for i, ks := range signers {
+				ss, err := f.SignRound2(ks, nonces[i], message, commitments)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sigShares[i] = ss
+			}
+
+			sig, err := f.Aggregate(message, commitments, sigShares)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !f.Verify(message, sig, keyShares[0].GroupKey) {
+				t.Error("signature verification failed")
+			}
+		})
+	}
+}
+
+func TestSignatureVerificationFailures(t *testing.T) {
+	g := &bjj.BJJ{}
+	f, _ := New(g, 2, 3)
+
+	// Run DKG
+	participants := make([]*Participant, 3)
+	for i := 0; i < 3; i++ {
+		p, _ := f.NewParticipant(rand.Reader, i+1)
+		participants[i] = p
+	}
+
+	broadcasts := make([]*Round1Data, 3)
+	for i, p := range participants {
+		broadcasts[i] = p.Round1Broadcast()
+	}
+
+	for i, sender := range participants {
+		for j := 0; j < 3; j++ {
+			if i == j {
+				continue
+			}
+			privateData := f.Round1PrivateSend(sender, j+1)
+			f.Round2ReceiveShare(participants[j], privateData, broadcasts[i].Commitments)
+		}
+	}
+
+	keyShares := make([]*KeyShare, 3)
+	for i, p := range participants {
+		keyShares[i], _ = f.Finalize(p, broadcasts)
+	}
+
+	// Create a valid signature
+	message := []byte("original message")
+	signers := keyShares[:2]
+
+	nonces := make([]*SigningNonce, 2)
+	commitments := make([]*SigningCommitment, 2)
+	for i, ks := range signers {
+		nonces[i], commitments[i], _ = f.SignRound1(rand.Reader, ks)
+	}
+
+	sigShares := make([]*SignatureShare, 2)
+	for i, ks := range signers {
+		sigShares[i], _ = f.SignRound2(ks, nonces[i], message, commitments)
+	}
+
+	sig, _ := f.Aggregate(message, commitments, sigShares)
+
+	// Verify the valid signature works
+	if !f.Verify(message, sig, keyShares[0].GroupKey) {
+		t.Fatal("valid signature should verify")
+	}
+
+	t.Run("WrongMessage", func(t *testing.T) {
+		if f.Verify([]byte("wrong message"), sig, keyShares[0].GroupKey) {
+			t.Error("signature should not verify with wrong message")
+		}
+	})
+
+	t.Run("WrongGroupKey", func(t *testing.T) {
+		// Create a different group key by running another DKG
+		f2, _ := New(g, 2, 3)
+		p2, _ := f2.NewParticipant(rand.Reader, 1)
+		wrongGroupKey := g.NewPoint().ScalarMult(p2.coefficients[0], g.Generator())
+
+		if f.Verify(message, sig, wrongGroupKey) {
+			t.Error("signature should not verify with wrong group key")
+		}
+	})
+
+	t.Run("TamperedSignatureR", func(t *testing.T) {
+		// Tamper with R component
+		tamperedR := g.NewPoint().Add(sig.R, g.Generator())
+		tamperedSig := &Signature{R: tamperedR, Z: sig.Z}
+
+		if f.Verify(message, tamperedSig, keyShares[0].GroupKey) {
+			t.Error("signature should not verify with tampered R")
+		}
+	})
+
+	t.Run("TamperedSignatureZ", func(t *testing.T) {
+		// Tamper with Z component
+		one := g.NewScalar()
+		one.SetBytes([]byte{1})
+		tamperedZ := g.NewScalar().Add(sig.Z, one)
+		tamperedSig := &Signature{R: sig.R, Z: tamperedZ}
+
+		if f.Verify(message, tamperedSig, keyShares[0].GroupKey) {
+			t.Error("signature should not verify with tampered Z")
+		}
+	})
+
+	t.Run("EmptyMessage", func(t *testing.T) {
+		// Sign empty message
+		emptyMsg := []byte{}
+
+		nonces := make([]*SigningNonce, 2)
+		commitments := make([]*SigningCommitment, 2)
+		for i, ks := range signers {
+			nonces[i], commitments[i], _ = f.SignRound1(rand.Reader, ks)
+		}
+
+		sigShares := make([]*SignatureShare, 2)
+		for i, ks := range signers {
+			sigShares[i], _ = f.SignRound2(ks, nonces[i], emptyMsg, commitments)
+		}
+
+		emptySig, _ := f.Aggregate(emptyMsg, commitments, sigShares)
+
+		if !f.Verify(emptyMsg, emptySig, keyShares[0].GroupKey) {
+			t.Error("empty message signature should verify")
+		}
+
+		// But original sig should not verify with empty message
+		if f.Verify(emptyMsg, sig, keyShares[0].GroupKey) {
+			t.Error("original signature should not verify with empty message")
+		}
 	})
 }
 

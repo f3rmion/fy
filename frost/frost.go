@@ -6,30 +6,50 @@ import (
 	"github.com/f3rmion/fy/group"
 )
 
-// FROST holds the group and threshold parameters.
+// FROST holds the cryptographic group and threshold parameters for the
+// FROST signature scheme. Create instances using [New].
 type FROST struct {
 	group     group.Group
 	threshold int // t - minimum signers needed
 	total     int // n - total participants
 }
 
-// KeyShare represents a participant's share of the secret key.
+// KeyShare represents a participant's share of the distributed secret key.
+// KeyShares are produced by the DKG protocol via [FROST.Finalize] and are
+// used for signing operations.
 type KeyShare struct {
-	ID        group.Scalar // participant identifier
-	SecretKey group.Scalar // secret key share
-	PublicKey group.Point  // public key share
-	GroupKey  group.Point  // combined group public key
+	// ID is the unique identifier for this participant (1 to n).
+	ID group.Scalar
+
+	// SecretKey is this participant's share of the group secret key.
+	// This value must be kept private.
+	SecretKey group.Scalar
+
+	// PublicKey is the public key corresponding to this participant's secret share.
+	PublicKey group.Point
+
+	// GroupKey is the combined group public key. This is the same for all
+	// participants and is used to verify signatures.
+	GroupKey group.Point
 }
 
-// Signature is a Schnorr signature.
+// Signature represents a Schnorr signature produced by the FROST protocol.
+// It can be verified against the group public key using [FROST.Verify].
 type Signature struct {
+	// R is the commitment point (nonce point).
 	R group.Point
+
+	// Z is the response scalar.
 	Z group.Scalar
 }
 
 // New creates a FROST instance with the given group and threshold parameters.
-// threshold is the minimum number of signers required (t).
-// total is the total number of participants (n).
+//
+// The threshold parameter specifies the minimum number of signers required (t)
+// to produce a valid signature. It must be at least 2.
+//
+// The total parameter specifies the total number of participants (n) in the
+// scheme. It must be greater than or equal to threshold.
 func New(g group.Group, threshold, total int) (*FROST, error) {
 	if threshold < 2 {
 		return nil, errors.New("threshold must be at least 2")
@@ -45,6 +65,7 @@ func New(g group.Group, threshold, total int) (*FROST, error) {
 	}, nil
 }
 
+// scalarFromInt creates a scalar from an integer value.
 func (f *FROST) scalarFromInt(n int) group.Scalar {
 	s := f.group.NewScalar()
 	buf := make([]byte, 32)
@@ -53,6 +74,9 @@ func (f *FROST) scalarFromInt(n int) group.Scalar {
 	return s
 }
 
+// evalPolynomial evaluates a polynomial at point x using Horner's method.
+// The polynomial is represented by its coefficients [a0, a1, ..., an]
+// where p(x) = a0 + a1*x + a2*x^2 + ... + an*x^n.
 func (f *FROST) evalPolynomial(coeffs []group.Scalar, x group.Scalar) group.Scalar {
 	result := f.group.NewScalar().Set(coeffs[len(coeffs)-1])
 	for i := len(coeffs) - 2; i >= 0; i-- {

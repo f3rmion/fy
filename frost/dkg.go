@@ -7,20 +7,35 @@ import (
 	"github.com/f3rmion/fy/group"
 )
 
-// Round1Data is broadcast by each participant in round 1.
+// Round1Data contains the public data broadcast by a participant during
+// round 1 of the DKG protocol. This includes commitments to the participant's
+// secret polynomial coefficients.
 type Round1Data struct {
-	ID          group.Scalar  // participant identifier
-	Commitments []group.Point // commitments to polynomial coefficients
+	// ID is the unique identifier of the broadcasting participant.
+	ID group.Scalar
+
+	// Commitments are Pedersen commitments to the polynomial coefficients.
+	// Commitments[i] = coefficients[i] * G, where G is the group generator.
+	Commitments []group.Point
 }
 
-// Round1PrivateData is sent privately to each participant.
+// Round1PrivateData contains the private share sent from one participant
+// to another during round 1 of the DKG protocol. This data must be sent
+// over a secure, authenticated channel.
 type Round1PrivateData struct {
-	FromID group.Scalar // sender's ID
-	ToID   group.Scalar // recipient's ID
-	Share  group.Scalar // polynomial evaluation for recipient
+	// FromID is the sender's participant identifier.
+	FromID group.Scalar
+
+	// ToID is the intended recipient's participant identifier.
+	ToID group.Scalar
+
+	// Share is the sender's polynomial evaluated at the recipient's ID.
+	// This value must be kept confidential during transmission.
+	Share group.Scalar
 }
 
-// Participant holds state during DKG.
+// Participant holds the state for a single participant during the DKG protocol.
+// Create instances using [FROST.NewParticipant].
 type Participant struct {
 	id             group.Scalar
 	coefficients   []group.Scalar          // our secret polynomial
@@ -28,7 +43,10 @@ type Participant struct {
 	receivedShares map[string]group.Scalar // shares from others
 }
 
-// NewParticipant creates a participant for DKG.
+// NewParticipant creates a new participant for the DKG protocol.
+//
+// The id parameter must be a unique integer from 1 to n (total participants).
+// The random reader r is used to generate the participant's secret polynomial.
 func (f *FROST) NewParticipant(r io.Reader, id int) (*Participant, error) {
 	// Generate random polynomial of degree t-1
 	coeffs := make([]group.Scalar, f.threshold)
@@ -54,7 +72,9 @@ func (f *FROST) NewParticipant(r io.Reader, id int) (*Participant, error) {
 	}, nil
 }
 
-// Round1Broadcast returns data to broadcast to all participants.
+// Round1Broadcast returns the public data that this participant must
+// broadcast to all other participants. This includes commitments to
+// the participant's secret polynomial.
 func (p *Participant) Round1Broadcast() *Round1Data {
 	return &Round1Data{
 		ID:          p.id,
@@ -62,7 +82,9 @@ func (p *Participant) Round1Broadcast() *Round1Data {
 	}
 }
 
-// Round1PrivateSend returns the share to send privately to recipient.
+// Round1PrivateSend computes and returns the private share that participant p
+// must send to the specified recipient. This data must be transmitted over a
+// secure, authenticated channel.
 func (f *FROST) Round1PrivateSend(p *Participant, recipientID int) *Round1PrivateData {
 	toID := f.scalarFromInt(recipientID)
 	share := f.evalPolynomial(p.coefficients, toID)
@@ -74,7 +96,12 @@ func (f *FROST) Round1PrivateSend(p *Participant, recipientID int) *Round1Privat
 	}
 }
 
-// Round2ReceiveShare verifies and stores a received share.
+// Round2ReceiveShare verifies a received share against the sender's public
+// commitments and stores it if valid. Returns an error if the share fails
+// verification, indicating a potentially malicious sender.
+//
+// The verification uses Feldman's VSS scheme: it checks that
+// share * G == sum(Commitment[i] * recipientID^i).
 func (f *FROST) Round2ReceiveShare(p *Participant, data *Round1PrivateData, senderCommitments []group.Point) error {
 	// Verify: share * G == sum(commitments[i] * recipientID^i)
 	lhs := f.group.NewPoint().ScalarMult(data.Share, f.group.Generator())
@@ -98,7 +125,12 @@ func (f *FROST) Round2ReceiveShare(p *Participant, data *Round1PrivateData, send
 	return nil
 }
 
-// Finalize computes the final key share after receiving all shares.
+// Finalize completes the DKG protocol for participant p, computing their
+// final key share. This should be called after all shares have been received
+// and verified via [FROST.Round2ReceiveShare].
+//
+// The returned [KeyShare] contains the participant's secret key share and
+// the group's combined public key, which is the same for all participants.
 func (f *FROST) Finalize(p *Participant, allBroadcasts []*Round1Data) (*KeyShare, error) {
 	// Sum all received shares (including our own)
 	secretKey := f.evalPolynomial(p.coefficients, p.id)
