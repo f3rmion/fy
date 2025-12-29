@@ -4,7 +4,16 @@ import (
 	"io"
 )
 
-// Scalar represents an element of the scalar field.
+// Scalar represents an element of the scalar field associated with a
+// cryptographic group. Scalars are integers modulo the group order and
+// are used as exponents in scalar multiplication.
+//
+// All arithmetic methods use a mutable receiver pattern: they modify
+// the receiver, store the result in it, and return it. This allows for
+// efficient method chaining while minimizing memory allocations.
+//
+// Implementations must ensure all operations produce results in the
+// valid range [0, order).
 type Scalar interface {
 	// Add sets the receiver to a+b and returns it. 
 	Add(a, b Scalar) Scalar
@@ -30,7 +39,15 @@ type Scalar interface {
 	IsZero() bool
 }
 
-// Point represents an element of the group.
+// Point represents an element of a cryptographic group, typically a point
+// on an elliptic curve. Points support addition, subtraction, negation,
+// and scalar multiplication.
+//
+// Like [Scalar], all arithmetic methods use a mutable receiver pattern
+// for efficiency.
+//
+// The identity element (zero point, point at infinity) is the additive
+// identity: P + Identity = P for all points P.
 type Point interface {
 	// Add sets the receiver to a+b and returns it.
 	Add(a, b Point) Point
@@ -53,7 +70,19 @@ type Point interface {
 	IsIdentity() bool
 }
 
-// Group defines a cryptographic group for use with FROST.
+// Group defines a cryptographic group suitable for use with FROST threshold
+// signatures. It provides factory methods for creating scalars and points,
+// access to the group's generator, and utility functions for random scalar
+// generation and hashing.
+//
+// A Group implementation encapsulates all curve-specific details, allowing
+// the FROST implementation to be generic over different elliptic curves.
+//
+// Example usage:
+//
+//	g := &bjj.BJJ{}  // or any other Group implementation
+//	scalar, _ := g.RandomScalar(rand.Reader)
+//	point := g.NewPoint().ScalarMult(scalar, g.Generator())
 type Group interface {
 	// NewScalar returns a new zero scalar.
 	NewScalar() Scalar
