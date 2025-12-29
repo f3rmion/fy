@@ -42,11 +42,6 @@ func TestDKGAndSign(t *testing.T) {
 				}
 				privateData := f.Round1PrivateSend(sender, j+1)
 
-				t.Logf("Sender %d -> Recipient %d", i+1, j+1)
-				t.Logf("  Share: %x", privateData.Share.Bytes())
-				t.Logf("  ToID: %x", privateData.ToID.Bytes())
-				t.Logf("  Recipient p.id: %x", participants[j].id.Bytes())
-
 				// Recipient receives and verifies
 				err := f.Round2ReceiveShare(participants[j], privateData, broadcasts[i].Commitments)
 				if err != nil {
