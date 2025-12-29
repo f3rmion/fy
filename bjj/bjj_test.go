@@ -89,7 +89,7 @@ func TestScalar(t *testing.T) {
 			// edge case is a==0 where -a==a
 			// for assertion below, so we exclude a==0
 			a, _ = g.RandomScalar(rand.Reader)
-			if !a.IsZero(){
+			if !a.IsZero() {
 				break
 			}
 		}

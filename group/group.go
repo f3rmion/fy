@@ -15,7 +15,7 @@ import (
 // Implementations must ensure all operations produce results in the
 // valid range [0, order).
 type Scalar interface {
-	// Add sets the receiver to a+b and returns it. 
+	// Add sets the receiver to a+b and returns it.
 	Add(a, b Scalar) Scalar
 	// Sub sets the receiver to a-b and returns it.
 	Sub(a, b Scalar) Scalar

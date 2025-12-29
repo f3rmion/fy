@@ -6,8 +6,8 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/f3rmion/fy/group"
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards"
+	"github.com/f3rmion/fy/group"
 )
 
 // curveOrder is the Baby Jubjub subgroup order.
