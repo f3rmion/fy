@@ -11,6 +11,7 @@ import (
 )
 
 // curveOrder is the Baby Jubjub subgroup order.
+// This is distinct from the BN254 scalar field order (Fr).
 var curveOrder *big.Int
 
 func init() {
@@ -18,8 +19,12 @@ func init() {
 	curveOrder = new(big.Int).Set(&curve.Order)
 }
 
-// Scalar implements group.Scalar using big.Int with modular arithmetic
-// over the Baby Jubjub curve order.
+// Scalar represents an element of the Baby Jubjub scalar field.
+// It implements [group.Scalar] using big.Int with modular arithmetic
+// over the curve's subgroup order.
+//
+// All arithmetic operations automatically reduce results modulo the
+// curve order to maintain valid scalar values.
 type Scalar struct {
 	inner *big.Int
 }
@@ -34,7 +39,7 @@ func (s *Scalar) reduce() {
 	s.inner.Mod(s.inner, curveOrder)
 }
 
-// Add implements group.Scalar.Add.
+// Add sets s to a + b (mod curveOrder) and returns s.
 func (s *Scalar) Add(a, b group.Scalar) group.Scalar {
 	aScalar := a.(*Scalar)
 	bScalar := b.(*Scalar)
@@ -43,7 +48,7 @@ func (s *Scalar) Add(a, b group.Scalar) group.Scalar {
 	return s
 }
 
-// Sub implements group.Scalar.Sub.
+// Sub sets s to a - b (mod curveOrder) and returns s.
 func (s *Scalar) Sub(a, b group.Scalar) group.Scalar {
 	aScalar := a.(*Scalar)
 	bScalar := b.(*Scalar)
@@ -52,7 +57,7 @@ func (s *Scalar) Sub(a, b group.Scalar) group.Scalar {
 	return s
 }
 
-// Mul implements group.Scalar.Mul.
+// Mul sets s to a * b (mod curveOrder) and returns s.
 func (s *Scalar) Mul(a, b group.Scalar) group.Scalar {
 	aScalar := a.(*Scalar)
 	bScalar := b.(*Scalar)
@@ -61,7 +66,7 @@ func (s *Scalar) Mul(a, b group.Scalar) group.Scalar {
 	return s
 }
 
-// Negate implements group.Scalar.Negate.
+// Negate sets s to -a (mod curveOrder) and returns s.
 func (s *Scalar) Negate(a group.Scalar) group.Scalar {
 	aScalar := a.(*Scalar)
 	s.inner.Neg(aScalar.inner)
@@ -69,27 +74,26 @@ func (s *Scalar) Negate(a group.Scalar) group.Scalar {
 	return s
 }
 
-// Invert implements group.Scalar.Invert.
+// Invert sets s to a^(-1) (mod curveOrder) and returns s.
+// Returns an error if a is zero, as zero has no multiplicative inverse.
 func (s *Scalar) Invert(a group.Scalar) (group.Scalar, error) {
 	aScalar := a.(*Scalar)
 	if aScalar.IsZero() {
 		return nil, errors.New("cannot invert zero scalar")
 	}
-	// ModInverse computes the modular multiplicative inverse
 	s.inner.ModInverse(aScalar.inner, curveOrder)
 	return s, nil
 }
 
-// Set implements group.Scalar.Set.
+// Set copies the value of a into s and returns s.
 func (s *Scalar) Set(a group.Scalar) group.Scalar {
 	aScalar := a.(*Scalar)
 	s.inner.Set(aScalar.inner)
 	return s
 }
 
-// Bytes implements group.Scalar.Bytes.
+// Bytes returns the scalar as a 32-byte big-endian representation.
 func (s *Scalar) Bytes() []byte {
-	// Pad to 32 bytes, big-endian
 	bytes := s.inner.Bytes()
 	if len(bytes) >= 32 {
 		return bytes[:32]
@@ -100,30 +104,35 @@ func (s *Scalar) Bytes() []byte {
 	return padded
 }
 
-// SetBytes implements group.Scalar.SetBytes.
+// SetBytes sets s from a big-endian byte slice and returns s.
+// The value is reduced modulo the curve order.
 func (s *Scalar) SetBytes(data []byte) (group.Scalar, error) {
 	s.inner.SetBytes(data)
 	s.reduce()
 	return s, nil
 }
 
-// Equal implements group.Scalar.Equal.
+// Equal reports whether s and b represent the same scalar value.
 func (s *Scalar) Equal(b group.Scalar) bool {
 	bScalar := b.(*Scalar)
 	return s.inner.Cmp(bScalar.inner) == 0
 }
 
-// IsZero implements group.Scalar.IsZero.
+// IsZero reports whether s is the zero scalar.
 func (s *Scalar) IsZero() bool {
 	return s.inner.Sign() == 0
 }
 
-// Point wraps gnark-crypto's PointAffine to implement group.Point.
+// Point represents a point on the Baby Jubjub curve.
+// It implements [group.Point] by wrapping gnark-crypto's PointAffine.
+//
+// Points are represented in affine coordinates (x, y) on the twisted
+// Edwards curve. The identity element is (0, 1).
 type Point struct {
 	inner twistededwards.PointAffine
 }
 
-// Add implements group.Point.Add. 
+// Add sets p to a + b and returns p.
 func (p *Point) Add(a, b group.Point) group.Point {
 	aPoint := a.(*Point)
 	bPoint := b.(*Point)
@@ -131,7 +140,7 @@ func (p *Point) Add(a, b group.Point) group.Point {
 	return p
 }
 
-// Sub implements group.Point.Sub. 
+// Sub sets p to a - b and returns p.
 func (p *Point) Sub(a, b group.Point) group.Point {
 	aPoint := a.(*Point)
 	bPoint := b.(*Point)
@@ -141,14 +150,14 @@ func (p *Point) Sub(a, b group.Point) group.Point {
 	return p
 }
 
-// Negate implements group.Point.Negate.
+// Negate sets p to -a and returns p.
 func (p *Point) Negate(a group.Point) group.Point {
 	aPoint := a.(*Point)
 	p.inner.Neg(&aPoint.inner)
 	return p
 }
 
-// ScalarMult implements group.Point.ScalarMult.
+// ScalarMult sets p to s * q and returns p.
 func (p *Point) ScalarMult(s group.Scalar, q group.Point) group.Point {
 	scalar := s.(*Scalar)
 	qPoint := q.(*Point)
@@ -156,47 +165,51 @@ func (p *Point) ScalarMult(s group.Scalar, q group.Point) group.Point {
 	return p
 }
 
-// Set implements group.Point.Set.
+// Set copies the value of a into p and returns p.
 func (p *Point) Set(a group.Point) group.Point {
 	aPoint := a.(*Point)
 	p.inner.Set(&aPoint.inner)
 	return p
 }
 
-// Bytes implements group.Point.Bytes.
+// Bytes returns the compressed point encoding as a byte slice.
 func (p *Point) Bytes() []byte {
 	bytes := p.inner.Bytes()
 	return bytes[:]
 }
 
-// SetBytes implements group.Point.SetBytes.
+// SetBytes sets p from a compressed point encoding and returns p.
+// Returns an error if the data does not represent a valid curve point.
 func (p *Point) SetBytes(data []byte) (group.Point, error) {
 	if err := p.inner.Unmarshal(data); err != nil {
 		return nil, err
 	}
 	return p, nil
 }
-	
-// Equal implements group.Point.Equal.
+
+// Equal reports whether p and b represent the same curve point.
 func (p *Point) Equal(b group.Point) bool {
 	bPoint := b.(*Point)
 	return p.inner.Equal(&bPoint.inner)
 }
 
-// IsIdentity implements group.Point.IsIdentity.
+// IsIdentity reports whether p is the identity element (0, 1).
 func (p *Point) IsIdentity() bool {
 	return p.inner.IsZero()
 }
 
-// BJJ implements group.Group for the BabyJubJub curve.
+// BJJ implements [group.Group] for the Baby Jubjub curve.
+//
+// BJJ is a zero-sized type that provides access to Baby Jubjub curve
+// operations. Create an instance with &BJJ{} or new(BJJ).
 type BJJ struct{}
 
-// NewScalar implements group.Group.NewScalar.
+// NewScalar returns a new scalar initialized to zero.
 func (g *BJJ) NewScalar() group.Scalar {
 	return newScalar()
 }
 
-// NewPoint implements group.Group.NewPoint.
+// NewPoint returns a new point initialized to the identity element (0, 1).
 func (g *BJJ) NewPoint() group.Point {
 	var p Point
 	p.inner.X.SetZero()
@@ -204,15 +217,16 @@ func (g *BJJ) NewPoint() group.Point {
 	return &p
 }
 
-// Generator implements group.Group.Generator.
+// Generator returns the standard base point for the Baby Jubjub curve.
 func (g *BJJ) Generator() group.Point {
 	var p Point
-	// Get BJJ generator from gnark-crypto
 	p.inner = twistededwards.GetEdwardsCurve().Base
 	return &p
 }
 
-// RandomScalar implements group.Group.RandomScalar.
+// RandomScalar generates a cryptographically random scalar using the
+// provided random source. The result is uniformly distributed in
+// [0, curveOrder).
 func (g *BJJ) RandomScalar(r io.Reader) (group.Scalar, error) {
 	var buf [32]byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
@@ -224,7 +238,8 @@ func (g *BJJ) RandomScalar(r io.Reader) (group.Scalar, error) {
 	return s, nil
 }
 
-// HashToScalar implements group.Group.HashToScalar.
+// HashToScalar hashes the provided data to a scalar using SHA-256.
+// Multiple byte slices are concatenated before hashing.
 func (g *BJJ) HashToScalar(data ...[]byte) (group.Scalar, error) {
 	h := sha256.New()
 	for _, d := range data {
@@ -238,7 +253,8 @@ func (g *BJJ) HashToScalar(data ...[]byte) (group.Scalar, error) {
 	return s, nil
 }
 
-// Order implements group.Group.Order.
+// Order returns the order of the Baby Jubjub curve's prime-order subgroup
+// as a big-endian byte slice.
 func (g *BJJ) Order() []byte {
 	return curveOrder.Bytes()
 }
