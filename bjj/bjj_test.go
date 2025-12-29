@@ -160,4 +160,88 @@ func TestPoint(t *testing.T) {
 			t.Error("generator should not be identity")
 		}
 	})
+
+	t.Run("ScalarMultDistributive", func(t *testing.T) {
+		// Test: (a+b)*G == a*G + b*G
+		a, _ := g.RandomScalar(rand.Reader)
+		b, _ := g.RandomScalar(rand.Reader)
+
+		// LHS: (a+b)*G
+		aPlusB := g.NewScalar().Add(a, b)
+		lhs := g.NewPoint().ScalarMult(aPlusB, g.Generator())
+
+		// RHS: a*G + b*G
+		aG := g.NewPoint().ScalarMult(a, g.Generator())
+		bG := g.NewPoint().ScalarMult(b, g.Generator())
+		rhs := g.NewPoint().Add(aG, bG)
+
+		if !lhs.Equal(rhs) {
+			t.Errorf("(a+b)*G != a*G + b*G")
+			t.Logf("a: %x", a.Bytes())
+			t.Logf("b: %x", b.Bytes())
+			t.Logf("LHS: %x", lhs.Bytes())
+			t.Logf("RHS: %x", rhs.Bytes())
+		}
+	})
+
+	t.Run("ScalarMultAssociative", func(t *testing.T) {
+		// Test: k*(b*G) == (k*b)*G
+		b, _ := g.RandomScalar(rand.Reader)
+
+		// k = 2
+		k := g.NewScalar()
+		buf := make([]byte, 32)
+		buf[31] = 2
+		k.SetBytes(buf)
+
+		// LHS: (k*b)*G
+		kb := g.NewScalar().Mul(k, b)
+		lhs := g.NewPoint().ScalarMult(kb, g.Generator())
+
+		// RHS: k*(b*G)
+		bG := g.NewPoint().ScalarMult(b, g.Generator())
+		rhs := g.NewPoint().ScalarMult(k, bG)
+
+		if !lhs.Equal(rhs) {
+			t.Errorf("k*(b*G) != (k*b)*G")
+			t.Logf("k: %x", k.Bytes())
+			t.Logf("b: %x", b.Bytes())
+			t.Logf("kb: %x", kb.Bytes())
+			t.Logf("LHS (kb*G): %x", lhs.Bytes())
+			t.Logf("RHS (k*bG): %x", rhs.Bytes())
+		}
+	})
+
+	t.Run("ScalarMultDistributiveWithCoefficient", func(t *testing.T) {
+		// Test: (a + k*b)*G == a*G + k*(b*G)
+		// This is the exact pattern used in DKG verification
+		a, _ := g.RandomScalar(rand.Reader)
+		b, _ := g.RandomScalar(rand.Reader)
+
+		// k = 2 (like recipient ID 2)
+		k := g.NewScalar()
+		buf := make([]byte, 32)
+		buf[31] = 2
+		k.SetBytes(buf)
+
+		// LHS: (a + k*b)*G
+		kb := g.NewScalar().Mul(k, b)
+		aPlusKB := g.NewScalar().Add(a, kb)
+		lhs := g.NewPoint().ScalarMult(aPlusKB, g.Generator())
+
+		// RHS: a*G + k*(b*G)
+		aG := g.NewPoint().ScalarMult(a, g.Generator())
+		bG := g.NewPoint().ScalarMult(b, g.Generator())
+		kbG := g.NewPoint().ScalarMult(k, bG)
+		rhs := g.NewPoint().Add(aG, kbG)
+
+		if !lhs.Equal(rhs) {
+			t.Errorf("(a + k*b)*G != a*G + k*(b*G)")
+			t.Logf("a: %x", a.Bytes())
+			t.Logf("b: %x", b.Bytes())
+			t.Logf("k: %x", k.Bytes())
+			t.Logf("LHS: %x", lhs.Bytes())
+			t.Logf("RHS: %x", rhs.Bytes())
+		}
+	})
 }
