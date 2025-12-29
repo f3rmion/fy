@@ -170,7 +170,10 @@ func (g *BJJ) NewScalar() group.Scalar {
 
 // NewPoint implements group.Group.NewPoint.
 func (g *BJJ) NewPoint() group.Point {
-	return &Point{} // zero value identity
+	var p Point
+	p.inner.X.SetZero()
+	p.inner.Y.SetOne()
+	return &p
 }
 
 // Generator implements group.Group.Generator.
