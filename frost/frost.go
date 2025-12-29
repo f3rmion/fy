@@ -7,9 +7,10 @@ import (
 )
 
 // FROST holds the cryptographic group and threshold parameters for the
-// FROST signature scheme. Create instances using [New].
+// FROST signature scheme. Create instances using [New] or [NewWithHasher].
 type FROST struct {
 	group     group.Group
+	hasher    Hasher
 	threshold int // t - minimum signers needed
 	total     int // n - total participants
 }
@@ -44,6 +45,8 @@ type Signature struct {
 }
 
 // New creates a FROST instance with the given group and threshold parameters.
+// It uses SHA-256 as the default hash function. Use [NewWithHasher] for
+// alternative hash configurations such as Blake2b for Ledger compatibility.
 //
 // The threshold parameter specifies the minimum number of signers required (t)
 // to produce a valid signature. It must be at least 2.
@@ -51,6 +54,17 @@ type Signature struct {
 // The total parameter specifies the total number of participants (n) in the
 // scheme. It must be greater than or equal to threshold.
 func New(g group.Group, threshold, total int) (*FROST, error) {
+	return NewWithHasher(g, threshold, total, &SHA256Hasher{})
+}
+
+// NewWithHasher creates a FROST instance with a custom hash function.
+// Use this constructor for Ledger/iden3 compatibility with [Blake2bHasher]
+// or other custom hash implementations.
+//
+// Example for Ledger compatibility:
+//
+//	f, err := frost.NewWithHasher(g, 2, 3, frost.NewBlake2bHasher())
+func NewWithHasher(g group.Group, threshold, total int, hasher Hasher) (*FROST, error) {
 	if threshold < 2 {
 		return nil, errors.New("threshold must be at least 2")
 	}
@@ -60,6 +74,7 @@ func New(g group.Group, threshold, total int) (*FROST, error) {
 
 	return &FROST{
 		group:     g,
+		hasher:    hasher,
 		threshold: threshold,
 		total:     total,
 	}, nil

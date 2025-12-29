@@ -456,3 +456,96 @@ func TestThresholdValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestBlake2bHasher(t *testing.T) {
+	g := &bjj.BJJ{}
+	threshold := 2
+	total := 3
+
+	// Use Blake2bHasher (Ledger compatible)
+	f, err := NewWithHasher(g, threshold, total, NewBlake2bHasher())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run DKG
+	participants := make([]*Participant, total)
+	for i := 0; i < total; i++ {
+		p, err := f.NewParticipant(rand.Reader, i+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		participants[i] = p
+	}
+
+	broadcasts := make([]*Round1Data, total)
+	for i, p := range participants {
+		broadcasts[i] = p.Round1Broadcast()
+	}
+
+	for i, sender := range participants {
+		for j := 0; j < total; j++ {
+			if i == j {
+				continue
+			}
+			privateData := f.Round1PrivateSend(sender, j+1)
+			if err := f.Round2ReceiveShare(participants[j], privateData, broadcasts[i].Commitments); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	keyShares := make([]*KeyShare, total)
+	for i, p := range participants {
+		ks, err := f.Finalize(p, broadcasts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyShares[i] = ks
+	}
+
+	// Sign with Blake2b hasher
+	message := []byte("test message with blake2b")
+	signers := keyShares[:threshold]
+
+	nonces := make([]*SigningNonce, threshold)
+	commitments := make([]*SigningCommitment, threshold)
+	for i, ks := range signers {
+		n, c, err := f.SignRound1(rand.Reader, ks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nonces[i] = n
+		commitments[i] = c
+	}
+
+	sigShares := make([]*SignatureShare, threshold)
+	for i, ks := range signers {
+		ss, err := f.SignRound2(ks, nonces[i], message, commitments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sigShares[i] = ss
+	}
+
+	sig, err := f.Aggregate(message, commitments, sigShares)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify signature
+	if !f.Verify(message, sig, keyShares[0].GroupKey) {
+		t.Error("signature verification failed with Blake2b hasher")
+	}
+
+	// Verify wrong message fails
+	if f.Verify([]byte("wrong message"), sig, keyShares[0].GroupKey) {
+		t.Error("signature should not verify with wrong message")
+	}
+
+	// Verify that signature from Blake2b hasher doesn't verify with SHA256 hasher
+	f2, _ := New(g, threshold, total)
+	if f2.Verify(message, sig, keyShares[0].GroupKey) {
+		t.Error("blake2b signature should not verify with sha256 hasher")
+	}
+}

@@ -86,8 +86,11 @@ func (f *FROST) SignRound2(
 	message []byte,
 	commitments []*SigningCommitment,
 ) (*SignatureShare, error) {
-	// Compute binding factors for each signer
-	bindingFactors := f.computeBindingFactors(message, commitments)
+	// Encode commitment list for binding factor computation
+	encCommitList := f.encodeCommitments(commitments)
+
+	// Compute binding factors for each signer using H1
+	bindingFactors := f.computeBindingFactors(message, encCommitList, commitments)
 
 	// Compute group commitment R = sum(D_i + rho_i * E_i)
 	R := f.group.NewPoint()
@@ -98,11 +101,8 @@ func (f *FROST) SignRound2(
 		R = f.group.NewPoint().Add(R, term)
 	}
 
-	// Compute challenge c = H(R, GroupKey, message)
-	c, err := f.group.HashToScalar(R.Bytes(), share.GroupKey.Bytes(), message)
-	if err != nil {
-		return nil, err
-	}
+	// Compute challenge c = H2(R, GroupKey, message)
+	c := f.hasher.H2(f.group, R.Bytes(), share.GroupKey.Bytes(), message)
 
 	// Compute Lagrange coefficient for this signer
 	lambda := f.lagrangeCoefficient(share.ID, commitments)
@@ -110,11 +110,11 @@ func (f *FROST) SignRound2(
 	// Compute signature share: z_i = d + rho * e + lambda * s * c
 	myRho := bindingFactors[string(share.ID.Bytes())]
 
-	z := f.group.NewScalar().Mul(myRho, nonce.E)              // rho * e
-	z = f.group.NewScalar().Add(nonce.D, z)                   // d + rho * e
+	z := f.group.NewScalar().Mul(myRho, nonce.E)                // rho * e
+	z = f.group.NewScalar().Add(nonce.D, z)                     // d + rho * e
 	lambdaS := f.group.NewScalar().Mul(lambda, share.SecretKey) // lambda * s
-	lambdaSC := f.group.NewScalar().Mul(lambdaS, c)           // lambda * s * c
-	z = f.group.NewScalar().Add(z, lambdaSC)                  // d + rho*e + lambda*s*c
+	lambdaSC := f.group.NewScalar().Mul(lambdaS, c)             // lambda * s * c
+	z = f.group.NewScalar().Add(z, lambdaSC)                    // d + rho*e + lambda*s*c
 
 	return &SignatureShare{
 		ID: share.ID,
@@ -132,8 +132,9 @@ func (f *FROST) Aggregate(
 	commitments []*SigningCommitment,
 	shares []*SignatureShare,
 ) (*Signature, error) {
-	// Recompute R
-	bindingFactors := f.computeBindingFactors(message, commitments)
+	// Encode commitment list and recompute R
+	encCommitList := f.encodeCommitments(commitments)
+	bindingFactors := f.computeBindingFactors(message, encCommitList, commitments)
 	R := f.group.NewPoint()
 	for _, comm := range commitments {
 		rho := bindingFactors[string(comm.ID.Bytes())]
@@ -155,13 +156,10 @@ func (f *FROST) Aggregate(
 // and group public key. Returns true if the signature is valid.
 //
 // This performs standard Schnorr signature verification:
-// z*G == R + c*Y, where c = H(R, Y, message).
+// z*G == R + c*Y, where c = H2(R, Y, message).
 func (f *FROST) Verify(message []byte, sig *Signature, groupKey group.Point) bool {
-	// c = H(R, GroupKey, message)
-	c, err := f.group.HashToScalar(sig.R.Bytes(), groupKey.Bytes(), message)
-	if err != nil {
-		return false
-	}
+	// c = H2(R, GroupKey, message)
+	c := f.hasher.H2(f.group, sig.R.Bytes(), groupKey.Bytes(), message)
 
 	// Check: z*G == R + c*Y
 	lhs := f.group.NewPoint().ScalarMult(sig.Z, f.group.Generator())
@@ -172,22 +170,26 @@ func (f *FROST) Verify(message []byte, sig *Signature, groupKey group.Point) boo
 	return lhs.Equal(rhs)
 }
 
-// computeBindingFactors derives the binding factor for each signer from
-// the message and all signing commitments. This ensures that each signer's
-// contribution is bound to the specific signing session.
-func (f *FROST) computeBindingFactors(message []byte, commitments []*SigningCommitment) map[string]group.Scalar {
-	factors := make(map[string]group.Scalar)
-
-	// Build commitment list bytes for hashing
+// encodeCommitments serializes the commitment list for hashing.
+// The encoding is: ID || HidingPoint || BindingPoint for each commitment.
+func (f *FROST) encodeCommitments(commitments []*SigningCommitment) []byte {
 	var commBytes []byte
 	for _, c := range commitments {
 		commBytes = append(commBytes, c.ID.Bytes()...)
 		commBytes = append(commBytes, c.HidingPoint.Bytes()...)
 		commBytes = append(commBytes, c.BindingPoint.Bytes()...)
 	}
+	return commBytes
+}
+
+// computeBindingFactors derives the binding factor for each signer from
+// the message and all signing commitments using H1. This ensures that each
+// signer's contribution is bound to the specific signing session.
+func (f *FROST) computeBindingFactors(message, encCommitList []byte, commitments []*SigningCommitment) map[string]group.Scalar {
+	factors := make(map[string]group.Scalar)
 
 	for _, c := range commitments {
-		rho, _ := f.group.HashToScalar(message, commBytes, c.ID.Bytes())
+		rho := f.hasher.H1(f.group, message, encCommitList, c.ID.Bytes())
 		factors[string(c.ID.Bytes())] = rho
 	}
 
