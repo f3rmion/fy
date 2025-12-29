@@ -187,6 +187,35 @@ func (p *Point) SetBytes(data []byte) (group.Point, error) {
 	return p, nil
 }
 
+// UncompressedBytes returns the 64-byte uncompressed point encoding (X || Y).
+// This format is compatible with iden3 and Ledger applications.
+// Each coordinate is encoded as a 32-byte big-endian integer.
+func (p *Point) UncompressedBytes() []byte {
+	result := make([]byte, 64)
+	xBytes := p.inner.X.Bytes()
+	yBytes := p.inner.Y.Bytes()
+	copy(result[0:32], xBytes[:])
+	copy(result[32:64], yBytes[:])
+	return result
+}
+
+// SetUncompressedBytes sets p from a 64-byte uncompressed encoding (X || Y).
+// This format is compatible with iden3 and Ledger applications.
+// Returns an error if the data is not 64 bytes or does not represent a
+// valid curve point.
+func (p *Point) SetUncompressedBytes(data []byte) error {
+	if len(data) != 64 {
+		return errors.New("uncompressed point must be 64 bytes")
+	}
+	p.inner.X.SetBytes(data[0:32])
+	p.inner.Y.SetBytes(data[32:64])
+	// Verify the point is on the curve
+	if !p.inner.IsOnCurve() {
+		return errors.New("point is not on curve")
+	}
+	return nil
+}
+
 // Equal reports whether p and b represent the same curve point.
 func (p *Point) Equal(b group.Point) bool {
 	bPoint := b.(*Point)

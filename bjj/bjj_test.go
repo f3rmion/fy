@@ -244,4 +244,100 @@ func TestPoint(t *testing.T) {
 			t.Logf("RHS: %x", rhs.Bytes())
 		}
 	})
+
+	t.Run("UncompressedBytesRoundtrip", func(t *testing.T) {
+		s, _ := g.RandomScalar(rand.Reader)
+		P := g.NewPoint().ScalarMult(s, g.Generator()).(*Point)
+
+		uncompressed := P.UncompressedBytes()
+		if len(uncompressed) != 64 {
+			t.Errorf("uncompressed bytes should be 64, got %d", len(uncompressed))
+		}
+
+		restored := &Point{}
+		if err := restored.SetUncompressedBytes(uncompressed); err != nil {
+			t.Fatal(err)
+		}
+
+		if !restored.Equal(P) {
+			t.Error("uncompressed bytes roundtrip failed")
+		}
+	})
+
+	t.Run("UncompressedBytesFormat", func(t *testing.T) {
+		// Verify the format is X || Y
+		s, _ := g.RandomScalar(rand.Reader)
+		P := g.NewPoint().ScalarMult(s, g.Generator()).(*Point)
+
+		uncompressed := P.UncompressedBytes()
+
+		// First 32 bytes should be X
+		xBytes := uncompressed[0:32]
+		// Last 32 bytes should be Y
+		yBytes := uncompressed[32:64]
+
+		// Create a new point and set coordinates manually
+		restored := &Point{}
+		restored.inner.X.SetBytes(xBytes)
+		restored.inner.Y.SetBytes(yBytes)
+
+		if !restored.Equal(P) {
+			t.Error("uncompressed format is not X || Y")
+		}
+	})
+
+	t.Run("UncompressedBytesInvalidLength", func(t *testing.T) {
+		P := &Point{}
+		err := P.SetUncompressedBytes(make([]byte, 32))
+		if err == nil {
+			t.Error("expected error for 32-byte input")
+		}
+
+		err = P.SetUncompressedBytes(make([]byte, 65))
+		if err == nil {
+			t.Error("expected error for 65-byte input")
+		}
+	})
+
+	t.Run("UncompressedBytesInvalidPoint", func(t *testing.T) {
+		// Random bytes unlikely to be a valid curve point
+		P := &Point{}
+		invalidData := make([]byte, 64)
+		for i := range invalidData {
+			invalidData[i] = byte(i + 1)
+		}
+		err := P.SetUncompressedBytes(invalidData)
+		if err == nil {
+			t.Error("expected error for invalid curve point")
+		}
+	})
+
+	t.Run("UncompressedBytesGenerator", func(t *testing.T) {
+		gen := g.Generator().(*Point)
+		uncompressed := gen.UncompressedBytes()
+
+		// Verify we can restore the generator
+		restored := &Point{}
+		if err := restored.SetUncompressedBytes(uncompressed); err != nil {
+			t.Fatal(err)
+		}
+
+		if !restored.Equal(gen) {
+			t.Error("failed to roundtrip generator")
+		}
+	})
+
+	t.Run("UncompressedBytesIdentity", func(t *testing.T) {
+		identity := g.NewPoint().(*Point)
+		uncompressed := identity.UncompressedBytes()
+
+		restored := &Point{}
+		if err := restored.SetUncompressedBytes(uncompressed); err != nil {
+			t.Fatal(err)
+		}
+
+		if !restored.IsIdentity() {
+			t.Error("failed to roundtrip identity point")
+		}
+	})
 }
