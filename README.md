@@ -95,6 +95,32 @@ sig, _ := f.Aggregate(message, commitments, sigShares)
 valid := f.Verify(message, sig, groupKey)
 ```
 
+### Hash Function Configuration
+
+FROST uses hash functions for binding factors and Schnorr challenges. By default, SHA-256 is used. For Ledger/iden3 compatibility, use the Blake2b hasher with domain separation:
+
+```go
+// Default: SHA-256 hasher
+f, _ := frost.New(g, 2, 3)
+
+// Ledger compatible: Blake2b-512 with domain separation
+f, _ := frost.NewWithHasher(g, 2, 3, frost.NewBlake2bHasher())
+```
+
+The Blake2b hasher uses the domain separation prefix "FROST-EDBABYJUJUB-BLAKE512-v1" and interprets hash output as little-endian before reducing modulo the curve order, matching Ledger's FROST implementation.
+
+You can implement custom hashers by satisfying the Hasher interface:
+
+```go
+type Hasher interface {
+    H1(g group.Group, msg, encCommitList, signerID []byte) group.Scalar  // binding factor
+    H2(g group.Group, R, Y, msg []byte) group.Scalar                     // Schnorr challenge
+    H3(g group.Group, seed, rho, msg []byte) group.Scalar                // nonce generation
+    H4(g group.Group, msg []byte) []byte                                 // message hash
+    H5(g group.Group, encCommitList []byte) []byte                       // commitment hash
+}
+```
+
 
 ## Package Structure
 
