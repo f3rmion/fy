@@ -186,8 +186,7 @@ func (p *Participant) ProcessRound1(input *Round1Input) (*DKGResult, error) {
 
 	// Verify and receive each share
 	for _, share := range input.PrivateShares {
-		senderKey := string(share.FromID.Bytes())
-		senderBroadcast, ok := broadcastByID[senderKey]
+		senderBroadcast, ok := broadcastByID[string(share.FromID.Bytes())]
 		if !ok {
 			return nil, fmt.Errorf("missing broadcast from sender of private share")
 		}
